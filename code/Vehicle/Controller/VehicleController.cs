@@ -9,7 +9,8 @@ public sealed partial class VehicleController : Component
 {
 	[Property, Required, Title("Physics Body")] public Rigidbody Rigidbody { get; set; }
 	public PhysicsBody Body => Rigidbody?.PhysicsBody;
-	public float Speed { get; set; }
+	public float Speed { get; private set; }
+	public float TurnDirection { get; private set; }
 	public override void Reset()
 	{
 		base.Reset();
@@ -22,23 +23,24 @@ public sealed partial class VehicleController : Component
 		VerifyInput();
 		TickAbilities();
 		Move();
-		UpdateCamera();
 	}
 
 	#region Movement
 
-	private float turnDirection;
 	private float turnLean;
 	private float airRoll;
 	private float airTilt;
 	private float CalculateTurnFactor( float direction, float forwardsSpeed )
 	{
+		const float MAX_TURN_FACTOR = 0.9f;
 		// Turning rate is at its highest a certain forwards speed 
 		// After that, it decreases
 
-		var turnFactor = MathF.Min( forwardsSpeed / GetTurnSpeedIdealDistance(), 1 );
-		var yawSpeedFactor = 1.0f - (forwardsSpeed / GetMaxSpeed()).Clamp( 0, GetTurnSpeedVelocityFactor() );
-		return direction * turnFactor * yawSpeedFactor;
+		float lowSpeedFactor = MathF.Min( forwardsSpeed / GetTurnSpeedIdealDistance(), 1 );
+		float highSpeedFactor = 1.0f - (forwardsSpeed / GetMaxSpeed()).Clamp( 0, GetTurnSpeedVelocityFactor() );
+		float factor = direction * lowSpeedFactor * highSpeedFactor;
+		factor = MathF.Abs( factor ).Clamp( 0, MAX_TURN_FACTOR ) * MathF.Sign( factor );
+		return factor;
 	}
 
 	private void Move()
@@ -56,7 +58,7 @@ public sealed partial class VehicleController : Component
 
 		//Acceleration direction here appears to simply refer to the input, and therefore the speed.
 		accelerateDirection = ThrottleInput.Clamp( -1, 1 );
-		turnDirection = turnDirection.LerpTo( TurnInput.Clamp( -1, 1 ), 1.0f - MathF.Pow( 0.0003f, dt ) );
+		TurnDirection = TurnDirection.LerpTo( TurnInput.Clamp( -1, 1 ), 1.0f - MathF.Pow( 0.0003f, dt ) );
 
 		//Same as above, but for the roll and tilt inpuuts, slower than turning.
 		airRoll = airRoll.LerpTo( RollInput.Clamp( -1, 1 ), 1.0f - MathF.Pow( 0.0001f, dt ) );
@@ -76,7 +78,7 @@ public sealed partial class VehicleController : Component
 			var speedFraction = MathF.Min( forwardSpeed / MAX_LEAN_SPEED, 1 );
 
 			targetTilt = accelerateDirection.Clamp( -1.0f, 1.0f );
-			targetLean = speedFraction * turnDirection;
+			targetLean = speedFraction * TurnDirection;
 		}
 
 		//Lerp our acceleration tilt to our target tilt
@@ -144,7 +146,7 @@ public sealed partial class VehicleController : Component
 			float turnAmount = 0.0f;
 			if ( turningWheelsOnGround )
 			{
-				turnAmount = MathF.Sign( localVelocity.x ) * turnSpeed * CalculateTurnFactor( turnDirection, MathF.Abs( localVelocity.x )) * dt;
+				turnAmount = MathF.Sign( localVelocity.x ) * turnSpeed * CalculateTurnFactor( TurnDirection, MathF.Abs( localVelocity.x )) * dt;
 			}
 			Body.AngularVelocity += rotation * new Vector3( 0, 0, turnAmount );
 
@@ -173,8 +175,8 @@ public sealed partial class VehicleController : Component
 		}
 		else
 		{
-			var s = Transform.Position + (rotation * Transform.Position);
-			var tr = Scene.Trace.Ray( s, s + rotation.Down * 50 )
+			Vector3 tracePosition = Transform.Position;
+			var tr = Scene.Trace.Ray( tracePosition, tracePosition + rotation.Down * 50 )
 				.IgnoreGameObject( GameObject )
 				.Run();
 
@@ -204,7 +206,6 @@ public sealed partial class VehicleController : Component
 				var force = (tr.Hit || tr2.Hit) ? FORCE_HIT : 100.0f;
 				var roll = (tr.Hit || tr2.Hit) ? airRoll.Clamp( -1, 1 ) : airRoll;
 				Body.ApplyForceAt( Body.MassCenter + rotation.Left * (offset * roll), (rotation.Down * roll) * (roll * (Body.Mass * force)) );
-
 				dampen = true;
 			}
 
@@ -245,6 +246,5 @@ public sealed partial class VehicleController : Component
 	{
 		const float POSITION_HELPER_RADIUS = 4f;
 		Gizmo.Draw.SolidSphere( ItemSpawnPosition, POSITION_HELPER_RADIUS );
-		Gizmo.Draw.SolidSphere( CameraPosition, POSITION_HELPER_RADIUS );
 	}
 }
